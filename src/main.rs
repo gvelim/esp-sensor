@@ -1,14 +1,17 @@
 #![no_std]
 #![no_main]
 
+use critical_section::Mutex;
+use core::cell::Cell;
+
 use esp_backtrace as _;
 use esp_println::println;
-use esp32c3_hal::{
+use esp32c3::{
     clock::ClockControl, 
     peripherals::Peripherals, 
     prelude::*, 
     timer::TimerGroup, 
-    Rtc
+    Rtc, IO, Delay
 };
 
 #[entry]
@@ -37,5 +40,18 @@ fn main() -> ! {
     wdt1.disable();
     println!("Hello world!");
 
-    loop {}
+    let io = IO::new(peripherals.GPIO,peripherals.IO_MUX);
+    let mut led = io.pins.gpio7.into_push_pull_output();
+    let button = io.pins.gpio9.into_pull_up_input();
+    
+    led.set_high().expect("Cannot set GPIO7 to high");
+    let mut delay = Delay::new(&clocks);
+
+    loop {
+        if button.is_low().unwrap() {
+            led.toggle().unwrap(); 
+        }
+
+        delay.delay_ms(500u32);
+    }
 }
