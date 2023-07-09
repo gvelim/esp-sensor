@@ -2,17 +2,19 @@
 #![no_main]
 
 use critical_section::Mutex;
-use core::cell::Cell;
+use core::cell::RefCell;
 
 use esp_backtrace as _;
 use esp_println::println;
 use esp32c3::{
     clock::ClockControl, 
-    peripherals::Peripherals, 
+    peripherals::{Peripherals, Interrupt}, 
     prelude::*, 
     timer::TimerGroup, 
-    Rtc, IO, Delay
+    Rtc, IO, Delay, gpio::{Gpio9, Input, PullDown, Event}, interrupt
 };
+
+static BUTTON: Mutex<RefCell<Option<Gpio9<Input<PullDown>>>>> = Mutex::new(RefCell::new(None));
 
 #[entry]
 fn main() -> ! {
@@ -41,17 +43,35 @@ fn main() -> ! {
     println!("Hello world!");
 
     let io = IO::new(peripherals.GPIO,peripherals.IO_MUX);
+
     let mut led = io.pins.gpio7.into_push_pull_output();
-    let button = io.pins.gpio9.into_pull_up_input();
-    
     led.set_high().expect("Cannot set GPIO7 to high");
+
+    let mut button = io.pins.gpio9.into_pull_down_input();
+    button.listen(Event::FallingEdge);
+    critical_section::with(|cs|
+        BUTTON.borrow_ref_mut(cs).replace(button)
+    );
+
+    interrupt::enable(Interrupt::GPIO, interrupt::Priority::Priority3).unwrap();
+    unsafe {
+        esp32c3::riscv::interrupt::enable();
+    }
+
     let mut delay = Delay::new(&clocks);
-
     loop {
-        if button.is_low().unwrap() {
-            led.toggle().unwrap(); 
-        }
-
+        led.toggle().unwrap();
         delay.delay_ms(500u32);
     }
+}
+
+#[interrupt]
+fn GPIO() {
+    critical_section::with(|cs| {
+        println!("GPIO interrupt");
+        BUTTON.borrow_ref_mut(cs)
+            .as_mut()
+            .unwrap()
+            .clear_interrupt();
+    });
 }
