@@ -5,7 +5,7 @@ use critical_section::Mutex;
 use core::cell::RefCell;
 
 use esp_backtrace as _;
-use esp_println::{println};
+use esp_println::println;
 use esp32c3::{
     clock::ClockControl, 
     peripherals::{Peripherals, Interrupt}, 
@@ -84,7 +84,7 @@ fn main() -> ! {
     let eot = PulseCode { level1: false, length1: 0u32.nanos(), level2: false, length2: 0u32.nanos() };
     // let eot = 0u32;
 
-    println!("TH {:b}, TL {:b}",u32::from(t1) as u32, u32::from(t0));
+    println!("TH {:b}, TL {:b}",u32::from(t1), u32::from(t0));
     println!("TH {:X}, TL {:X}",u32::from(t1), u32::from(t0));
     println!("TH {}, TL {}",u32::from(t1), u32::from(t0));
 
@@ -100,7 +100,7 @@ fn main() -> ! {
         led.toggle().unwrap();
         ch0.send_pulse_sequence(RepeatMode::SingleShot, &rgb_data).unwrap();
         rgb_data[0..24].rotate_left(1);
-        delay.delay_ms(100u32);
+        delay.delay_ms(500u32);
     }
 }
 
