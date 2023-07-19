@@ -89,10 +89,10 @@ fn main() -> ! {
     println!("TH {}, TL {}",u32::from(t1), u32::from(t0));
 
     let mut rgb_data = [
-        t1, t0, t0, t0, t0, t0, t0, t0, // Green
+        t1, t1, t1, t1, t1, t1, t1, t1, // Green
         t0, t0, t0, t0, t0, t0, t0, t0, // Red
         t0, t0, t0, t0, t0, t0, t0, t0, // Blue
-        eot // end of transmission marker
+        rst, eot // end of transmission marker
     ];
 
     let mut delay = Delay::new(&clocks);
@@ -100,7 +100,7 @@ fn main() -> ! {
         led.toggle().unwrap();
         ch0.send_pulse_sequence(RepeatMode::SingleShot, &rgb_data).unwrap();
         rgb_data[0..24].rotate_left(1);
-        delay.delay_ms(200u32);
+        delay.delay_ms(100u32);
     }
 }
 
