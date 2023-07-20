@@ -14,7 +14,18 @@ use esp32c3::{
     Rtc, IO, Delay, gpio::{Gpio9, Input, PullDown, Event}, interrupt, pulse_control::{ClockSource, PulseCode, RepeatMode}
 };
 
-static BUTTON: Mutex<RefCell<Option<Gpio9<Input<PullDown>>>>> = Mutex::new(RefCell::new(None));
+struct State {
+    button: Option<Gpio9<Input<PullDown>>>,
+    fps : [u32;13]
+}
+
+static STATE: Mutex<RefCell<State>> = Mutex::new(RefCell::new(
+    State {
+        button: None,
+        fps: [10u32, 20u32, 40u32, 80u32, 160u32, 320u32, 640u32, 1280u32, 640u32, 320u32, 80u32, 40u32, 20u32]
+    }
+));
+
 
 #[entry]
 fn main() -> ! {
@@ -50,7 +61,9 @@ fn main() -> ! {
     let mut button = io.pins.gpio9.into_pull_down_input();
     button.listen(Event::FallingEdge);
     critical_section::with(|cs|
-        BUTTON.borrow_ref_mut(cs).replace(button)
+        STATE.borrow_ref_mut(cs)
+            .button
+            .replace(button)
     );
 
     interrupt::enable(Interrupt::GPIO, interrupt::Priority::Priority3).unwrap();
@@ -100,17 +113,18 @@ fn main() -> ! {
         led.toggle().unwrap();
         ch0.send_pulse_sequence(RepeatMode::SingleShot, &rgb_data).unwrap();
         rgb_data[0..24].rotate_left(1);
-        delay.delay_ms(500u32);
+        delay.delay_ms(
+            critical_section::with(|cs| STATE.borrow_ref(cs).fps[0])
+        );
     }
 }
 
 #[interrupt]
 fn GPIO() {
     critical_section::with(|cs| {
-        println!("GPIO interrupt");
-        BUTTON.borrow_ref_mut(cs)
-            .as_mut()
-            .unwrap()
-            .clear_interrupt();
+        let mut state = STATE.borrow_ref_mut(cs);
+        state.fps.rotate_left(1);
+        println!("GPIO interrupt - fps({})", state.fps[0]);
+        state.button.as_mut().unwrap().clear_interrupt();
     });
 }
