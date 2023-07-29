@@ -3,16 +3,18 @@
 
 use critical_section::Mutex;
 use core::cell::RefCell;
+use core::ops::BitAnd;
 
 use esp_backtrace as _;
 use esp_println::println;
 use esp32c3::{
     clock::ClockControl, 
-    peripherals::{Peripherals, Interrupt}, 
+    peripherals::{Peripherals, Interrupt, APB_SARADC},
     prelude::*, 
     timer::TimerGroup, 
     Rtc, IO, Delay, gpio::{Gpio9, Input, PullDown, Event}, interrupt, pulse_control::{ClockSource, PulseCode, RepeatMode}
 };
+use esp32c3::peripheral::Peripheral;
 
 struct State {
     button: Option<Gpio9<Input<PullDown>>>,
@@ -80,7 +82,8 @@ fn main() -> ! {
         ClockSource::APB, 
         0, 
         0, 
-        0).unwrap();
+        0
+    ).unwrap();
 
     rmt.channel0
         .set_idle_output_level(false)
@@ -90,37 +93,87 @@ fn main() -> ! {
 
     let mut ch0 = rmt.channel0.assign_pin(io.pins.gpio2);
 
-    // NanosDuration::<u32>::from_ticks((SK68XX_T0L_NS * (SOURCE_CLK_FREQ / 1_000_000)) / 500);
-    let t1 = PulseCode { level1: true, length1: 56u32.nanos(), level2: false, length2: 48u32.nanos() };
-    // let t1: u32 = (1u32 << 31) + (56u32 << 16) + (0u32 << 15) + 48u32;
-    let t0 = PulseCode { level1: true, length1: 28u32.nanos(), level2: false, length2: 64u32.nanos() };
-    // let t0: u32 = (1u32 << 31) + (28u32 << 16) + (0u32 << 15) + 64u32;
-    let rst = PulseCode { level1: false, length1: 2400u32.nanos(), level2: false, length2: 2400u32.nanos() };
-    // let rst = (1u32 << 31) + (2400u32 << 16) + (0u32 << 15) + 2400u32;
-    let eot = PulseCode { level1: false, length1: 0u32.nanos(), level2: false, length2: 0u32.nanos() };
-    // let eot = 0u32;
 
-    println!("TH {:b}, TL {:b}",u32::from(t1), u32::from(t0));
-    println!("TH {:X}, TL {:X}",u32::from(t1), u32::from(t0));
-    println!("TH {}, TL {}",u32::from(t1), u32::from(t0));
-
-    let mut rgb_data : [PulseCode; 26] = [
-        t1, t1, t1, t1, t1, t1, t1, t1, // Green
-        t0, t0, t0, t0, t0, t0, t0, t0, // Red
-        t0, t0, t0, t0, t0, t0, t0, t0, // Blue
-        rst, eot // end of transmission marker
-    ];
+    let mut rgb_data = RgbLed::new();
+    let mut g = Bounce::new(15, (u8::MIN,32));
+    let mut r = Bounce::new(0, (u8::MIN,32));
+    let mut b = Bounce::new(31, (u8::MIN,32));
 
     let mut delay = Delay::new(&clocks);
     loop {
         led.toggle().unwrap();
-        ch0.send_pulse_sequence(RepeatMode::SingleShot, &rgb_data).unwrap();
-        rgb_data[0..24].rotate_left(1);
+
+        rgb_data.set(RGB::GREEN, g.next().unwrap());
+        rgb_data.set(RGB::RED, r.next().unwrap());
+        rgb_data.set(RGB::BLUE, b.next().unwrap());
+
+        ch0.send_pulse_sequence_raw(RepeatMode::SingleShot, &rgb_data.data).unwrap();
+
         delay.delay_ms(
             critical_section::with(|cs| STATE.borrow_ref(cs).fps[0])
         );
     }
 }
+
+enum TOGGLE { UP, DOWN }
+struct Bounce<T> {
+    rng: (T,T),
+    val : T,
+    toggle: TOGGLE
+}
+impl Bounce<u8> {
+    fn new(val: u8, rng: (u8, u8)) -> Bounce<u8> {
+        Bounce { rng, val, toggle: TOGGLE::UP }
+    }
+}
+impl Iterator for Bounce<u8> {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (min,max) = self.rng;
+        match self {
+            &mut Bounce{ val, toggle:TOGGLE::UP, .. } if val == max => self.toggle = TOGGLE::DOWN,
+            &mut Bounce{ val, toggle:TOGGLE::DOWN,..} if val == min => self.toggle = TOGGLE::UP,
+            &mut _ => {}
+        }
+        self.val = match self.toggle {
+            TOGGLE::UP => self.val + 1,
+            TOGGLE::DOWN => self.val - 1,
+        };
+        Some(self.val)
+    }
+}
+
+// NanosDuration::<u32>::from_ticks((SK68XX_T0L_NS * (SOURCE_CLK_FREQ / 1_000_000)) / 500);
+// let t1 = PulseCode { level1: true, length1: 56u32.nanos(), level2: false, length2: 48u32.nanos() };
+// let t1: u32 = (1u32 << 31) + (56u32 << 16) + (0u32 << 15) + 48u32;
+// let t0 = PulseCode { level1: true, length1: 28u32.nanos(), level2: false, length2: 64u32.nanos() };
+const T1: u32 = (1u32 << 31) + (56u32 << 16) + (0u32 << 15) + 48u32;
+const T0: u32 = (1u32 << 31) + (28u32 << 16) + (0u32 << 15) + 64u32;
+const RST: u32 = (1u32 << 31) + (2400u32 << 16) + (0u32 << 15) + 2400u32;
+const END: u32 = 0u32;
+
+#[derive(Clone, Copy)]
+enum RGB {GREEN=0, RED=8, BLUE=16}
+struct RgbLed {
+    data: [u32;26],
+}
+
+impl RgbLed {
+    fn new() -> RgbLed {
+        let mut data = [0u32;26];
+        data[24] = RST;
+        data[25] = END;
+        RgbLed { data }
+    }
+    fn set(&mut self, colour: RGB, mut val: u8) {
+        for idx in 0..8 {
+            self.data[colour as usize + idx] = match val.bitand(128u8) { 0 => T0, _ => T1, };
+            val = val << 1;
+        }
+    }
+}
+
 
 #[interrupt]
 fn GPIO() {
@@ -158,8 +211,8 @@ const APB_SARADC_TSENS_OUT: u32 = 0x0000_00FF;                  // Wait for a wh
 
 #[repr(C)]
 struct TempSensor {
-    ctrl_reg: u32,
-    ctrl2_reg: u32
+    ctrl2_reg: u32,
+    ctrl_reg: u32
 }
 impl TempSensor {
     fn init() -> &'static mut TempSensor {
@@ -186,10 +239,8 @@ impl TempSensor {
         }
     }
     fn read_temp(&self) -> f32 {
-        unsafe {
-            println!("APB_SARADC_APB_TSENS_CTRL2_REG = {:b}", self.ctrl2_reg);
-            println!("APB_SARADC_APB_TSENS_CTRL_REG = {:b}", self.ctrl_reg);
-            0.4386f32 * (self.ctrl_reg & APB_SARADC_TSENS_OUT) as f32 - 27.88f32 * 0f32 - 20.52f32
-        }
+        println!("APB_SARADC_APB_TSENS_CTRL2_REG = {:b}", self.ctrl2_reg);
+        println!("APB_SARADC_APB_TSENS_CTRL_REG = {:b}", self.ctrl_reg);
+        0.4386f32 * (self.ctrl_reg & APB_SARADC_TSENS_OUT) as f32 - 27.88f32 * 0f32 - 20.52f32
     }
 }
