@@ -9,12 +9,12 @@ use esp_backtrace as _;
 use esp_println::println;
 use esp32c3::{
     clock::ClockControl, 
-    peripherals::{Peripherals, Interrupt, APB_SARADC},
+    peripherals::{Peripherals, Interrupt},
     prelude::*, 
     timer::TimerGroup, 
-    Rtc, IO, Delay, gpio::{Gpio9, Input, PullDown, Event}, interrupt, pulse_control::{ClockSource, PulseCode, RepeatMode}
+    Rtc, IO, Delay, gpio::{Gpio9, Input, PullDown, Event}, interrupt, pulse_control::{ClockSource, RepeatMode}
 };
-use esp32c3::peripheral::Peripheral;
+
 
 struct State {
     button: Option<Gpio9<Input<PullDown>>>,
@@ -94,7 +94,7 @@ fn main() -> ! {
     let mut ch0 = rmt.channel0.assign_pin(io.pins.gpio2);
 
 
-    let mut rgb_data = RgbLed::new();
+    let mut rgb_led = RgbLed::new();
     let mut g = Bounce::new(15, (u8::MIN,32));
     let mut r = Bounce::new(0, (u8::MIN,32));
     let mut b = Bounce::new(31, (u8::MIN,32));
@@ -103,11 +103,11 @@ fn main() -> ! {
     loop {
         led.toggle().unwrap();
 
-        rgb_data.set(RGB::GREEN, g.next().unwrap());
-        rgb_data.set(RGB::RED, r.next().unwrap());
-        rgb_data.set(RGB::BLUE, b.next().unwrap());
+        rgb_led.set(RGB::GREEN, g.next().unwrap());
+        rgb_led.set(RGB::RED, r.next().unwrap());
+        rgb_led.set(RGB::BLUE, b.next().unwrap());
 
-        ch0.send_pulse_sequence_raw(RepeatMode::SingleShot, &rgb_data.data).unwrap();
+        ch0.send_pulse_sequence_raw(RepeatMode::SingleShot, &rgb_led.data).unwrap();
 
         delay.delay_ms(
             critical_section::with(|cs| STATE.borrow_ref(cs).fps[0])
@@ -156,14 +156,12 @@ const END: u32 = 0u32;
 #[derive(Clone, Copy)]
 enum RGB {GREEN=0, RED=8, BLUE=16}
 struct RgbLed {
-    data: [u32;26],
+    data: [u32;25],
 }
 
 impl RgbLed {
     fn new() -> RgbLed {
-        let mut data = [0u32;26];
-        data[24] = RST;
-        data[25] = END;
+        let data = [0u32;25];
         RgbLed { data }
     }
     fn set(&mut self, colour: RGB, mut val: u8) {
