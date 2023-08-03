@@ -93,11 +93,10 @@ fn main() -> ! {
 
     let mut ch0 = rmt.channel0.assign_pin(io.pins.gpio2);
 
-
     let mut rgb_led = RgbLed::new();
-    let mut g = Bounce::new(15, (u8::MIN,32));
-    let mut r = Bounce::new(0, (u8::MIN,32));
-    let mut b = Bounce::new(31, (u8::MIN,32));
+    let mut g = Bounce::new(0, (u8::MIN,16));
+    let mut r = Bounce::new(15, (u8::MIN,16));
+    let mut b = Bounce::new(7, (u8::MIN,16));
 
     let mut delay = Delay::new(&clocks);
     loop {
@@ -158,17 +157,17 @@ enum RGB {GREEN=0, RED=8, BLUE=16}
 struct RgbLed {
     data: [u32;25],
 }
-
 impl RgbLed {
     fn new() -> RgbLed {
-        let data = [0u32;25];
+        let mut data = [T0;25];
+        data[24] = END;
         RgbLed { data }
     }
     fn set(&mut self, colour: RGB, mut val: u8) {
-        for idx in 0..8 {
-            self.data[colour as usize + idx] = match val.bitand(128u8) { 0 => T0, _ => T1, };
+        (0..8usize).for_each(|idx| {
+            self.data[idx + colour as usize] = match val.bitand(128u8) { 0 => T0, _ => T1, };
             val = val << 1;
-        }
+        });
     }
 }
 
