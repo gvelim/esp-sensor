@@ -94,17 +94,22 @@ fn main() -> ! {
     let mut ch0 = rmt.channel0.assign_pin(io.pins.gpio2);
 
     let mut rgb_led = RgbLed::new();
-    let mut g = Bounce::new(0, (u8::MIN,16));
-    let mut r = Bounce::new(15, (u8::MIN,16));
-    let mut b = Bounce::new(7, (u8::MIN,16));
+    let mut g = Bounce::new(0, (u8::MIN,31));
+    let mut r = Bounce::new(0, (u8::MIN,31));
+    let mut b = Bounce::new(0, (u8::MIN,31));
 
+    led.toggle().unwrap();
+
+    let mut i = 0usize;
     let mut delay = Delay::new(&clocks);
     loop {
-        led.toggle().unwrap();
-
-        rgb_led.set(RGB::GREEN, g.next().unwrap());
-        rgb_led.set(RGB::RED, r.next().unwrap());
-        rgb_led.set(RGB::BLUE, b.next().unwrap());
+        match i {
+            0..=62 => rgb_led.set(RGB::GREEN, g.next().unwrap()),
+            63..=124 => rgb_led.set(RGB::RED, r.next().unwrap()),
+            125..=186 => rgb_led.set(RGB::BLUE, b.next().unwrap()),
+            _ => i = 0, 
+        };
+        i += 1;
 
         ch0.send_pulse_sequence_raw(RepeatMode::SingleShot, &rgb_led.data).unwrap();
 
